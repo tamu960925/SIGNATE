@@ -52,13 +52,17 @@ combined_data[numerical_features] = scaler.fit_transform(combined_data[numerical
 train_data = combined_data[combined_data['price'].notna()]
 test_data = combined_data[combined_data['price'].isna()]
 
-# Step 3: Train Neural Network models and make predictions
-features = train_data.drop(columns=['price', 'id'])
-target = train_data['price']
-test_features = test_data.drop(columns=['price', 'id'])
+# Split the data based on vehicle type
+vehicle_types = ["type_truck", "type_bus", "type_pickup"]
+train_data_type1 = train_data[train_data[vehicle_types].any(axis=1)]
+train_data_type2 = train_data[~train_data[vehicle_types].any(axis=1)]
 
+test_data_type1 = test_data[test_data[vehicle_types].any(axis=1)]
+test_data_type2 = test_data[~test_data[vehicle_types].any(axis=1)]
+
+# Step 3: Train Neural Network models and make predictions
 # Define KFold cross-validation
-kfold = KFold(n_splits=2, shuffle=True, random_state=1)
+kfold = KFold(n_splits=10, shuffle=True, random_state=1)
 
 # Define learning rate scheduler
 def scheduler(epoch, lr):
@@ -70,48 +74,57 @@ def scheduler(epoch, lr):
 callback = LearningRateScheduler(scheduler)
 
 # Define early stopping
-early_stopping = EarlyStopping(monitor='val_loss', patience=5)
+early_stopping = EarlyStopping(monitor='val_loss', patience=10)
 
 # Create and fit models with KFold cross-validation
 test_predictions = []
-for train_index, val_index in kfold.split(features):
-    train_features, val_features = features.iloc[train_index], features.iloc[val_index]
-    train_target, val_target = target.iloc[train_index], target.iloc[val_index]
+train_datasets = [(train_data_type1, test_data_type1), (train_data_type2, test_data_type2)]
 
-    # Create a neural network model with dropout
-    model = Sequential()
-    model.add(Dense(512, activation='relu', input_dim=train_features.shape[1]))  # Increased size
-    model.add(Dropout(0.4))
-    model.add(Dense(256, activation='relu'))  # Increased size
-    model.add(Dropout(0.4))
-    model.add(Dense(128, activation='relu'))
-    model.add(Dropout(0.4))
-    model.add(Dense(64, activation='relu'))
-    model.add(Dense(1))
+for train_data, test_data in train_datasets:
+    features = train_data.drop(columns=['price', 'id'])
+    target = train_data['price']
+    test_features = test_data.drop(columns=['price', 'id'])
 
-    model.compile(optimizer=Adam(0.00001), loss='mean_absolute_percentage_error')
+    for train_index, val_index in kfold.split(features):
+        train_features, val_features = features.iloc[train_index], features.iloc[val_index]
+        train_target, val_target = target.iloc[train_index], target.iloc[val_index]
 
-    # Fit the model with more epochs
-    history = model.fit(train_features, train_target, epochs=10000, batch_size=512, verbose=1,
-                        callbacks=[callback, early_stopping], validation_data=(val_features, val_target))
+        # Create a neural network model with dropout
+        model = Sequential()
+        model.add(Dense(512, activation='relu', input_dim=train_features.shape[1]))
+        model.add(Dropout(0.4))
+        model.add(Dense(256, activation='relu'))
+        model.add(Dropout(0.4))
+        model.add(Dense(128, activation='relu'))
+        model.add(Dropout(0.4))
+        model.add(Dense(64, activation='relu'))
+        model.add(Dense(1))
 
-    # After fitting, plot the loss per epoch
-    plt.figure(figsize=(10, 6))
-    plt.plot(history.history['loss'], label='Training loss')
-    plt.plot(history.history['val_loss'], label='Validation loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
-    plt.show()
+        model.compile(optimizer=Adam(0.0001), loss='mean_absolute_percentage_error')
 
-    # Make predictions and store them
-    model_predictions = model.predict(test_features)
-    test_predictions.append(model_predictions)
+        # Fit the model with more epochs
+        history = model.fit(train_features, train_target, epochs=10000, batch_size=256, verbose=1,
+                            callbacks=[callback, early_stopping], validation_data=(val_features, val_target))
 
-# Average predictions from all models
-test_predictions = np.mean(test_predictions, axis=0)
+        # After fitting, plot the loss per epoch
+        plt.figure(figsize=(10, 6))
+        plt.plot(history.history['loss'], label='Training loss')
+        plt.plot(history.history['val_loss'], label='Validation loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.legend()
+        plt.show()
+
+        # Make predictions and store them
+        model_predictions = model.predict(test_features)
+        test_predictions.append((test_data['id'], model_predictions))
 
 # Step 4: Save predictions to a CSV file
+# Concatenate predictions from all models
+test_predictions = pd.concat([pd.DataFrame({'id': ids, 'price': preds.flatten()}) for ids, preds in test_predictions])
+
+# Average predictions for each ID
+test_predictions = test_predictions.groupby('id').mean().reset_index()
+
 date_string = datetime.now().strftime("%Y-%m-%d")
-submission = pd.DataFrame({'id': test_data['id'], 'price': test_predictions.flatten()})
-submission.to_csv('/content/drive/MyDrive/Colab Notebooks/Signate/submission_{}.csv'.format(date_string), index=False, header=False)
+test_predictions.to_csv('/content/drive/MyDrive/Colab Notebooks/Signate/submission_{}.csv'.format(date_string), index=False, header=False)
