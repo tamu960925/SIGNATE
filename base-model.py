@@ -22,7 +22,7 @@ test_data = pd.read_csv('/content/drive/MyDrive/Colab Notebooks/Signate/train.cs
 combined_data = pd.concat([train_data, test_data])
 
 # Correct anomalies
-combined_data.loc[combined_data['year'] > 2023, 'year'] = 2017  # replace 3017 with 2017
+combined_data.loc[combined_data['year'] >= 3000, 'year'] -= 1000  # adjust years in 3000s to 2000s
 combined_data['odometer'] = combined_data['odometer'].abs()  # take absolute value of odometer
 
 # Fill numerical missing values with KNN imputation
